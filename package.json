@@ -1,0 +1,15 @@
+{
+    "name": "twitch-webhook",
+    "version": "1.0.0",
+    "description": "Webhook para Twitch com integração ao Discord",
+    "main": "index.js",
+    "scripts": {
+      "start": "node index.js"
+    },
+    "dependencies": {
+      "axios": "^0.21.1",
+      "discord.js": "^14.0.0",
+      "dotenv": "^10.0.0"
+    }
+  }
+  
