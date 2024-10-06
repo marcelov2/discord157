@@ -1,20 +1,20 @@
-# Usa a imagem oficial do Node.js
-FROM node:18
+# Use a imagem base do Node.js
+FROM node:16
 
 # Define o diretório de trabalho
 WORKDIR /usr/src/app
 
-# Copia o package.json e package-lock.json
+# Copia os arquivos package.json e package-lock.json
 COPY package*.json ./
 
 # Instala as dependências
 RUN npm install
 
-# Copia o restante do código
+# Copia o restante dos arquivos
 COPY . .
 
-# Expondo a porta 3000
+# Expõe a porta que o servidor irá usar
 EXPOSE 3000
 
-# Comando para iniciar a aplicação
+# Comando para iniciar o servidor
 CMD ["node", "index.js"]
