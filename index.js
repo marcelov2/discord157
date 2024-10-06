@@ -68,21 +68,37 @@ async function checkStream(twitchUser) {
   }
 }
 
+// Limpa o chat quando o bot desconectar
+async function clearChat(channel) {
+  let messages;
+  do {
+    messages = await channel.messages.fetch({ limit: 100 });
+
+    // Se não houver mensagens, parar de buscar
+    if (messages.size === 0) {
+      break;
+    }
+
+    // Exclui as mensagens
+    await channel.bulkDelete(messages).catch(error => {
+      console.error('Erro ao limpar mensagens:', error);
+    });
+
+  } while (messages.size > 0);
+}
+
 // Função para verificar as lives da Twitch periodicamente
 async function checkTwitchStreams() {
   const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
   liveStreamers = [];
 
-  // Limpa o chat antes de verificar
-  const messages = await channel.messages.fetch({ limit: 100 });
-  await channel.bulkDelete(messages);
-
   for (const twitchUser of TWITCH_USERS) {
     const streamData = await checkStream(twitchUser);
 
+    // Se o streamer estiver ao vivo e não está sendo monitorado
     if (streamData && !monitoredStreams.has(twitchUser)) {
       const { stream, profileImageUrl } = streamData;
-      const thumbnailUrl = stream.thumbnail_url.replace('{width}', '400').replace('{height}', '80'); // Miniatura da stream em 400x80
+      const thumbnailUrl = stream.thumbnail_url.replace('{width}', '400').replace('{height}', '225'); // Miniatura da stream em 400x80
 
       const updatedEmbed = new EmbedBuilder()
         .setTitle(`${twitchUser} está ao vivo na Twitch!`)
@@ -93,20 +109,49 @@ async function checkTwitchStreams() {
         .setColor(Colors.Red)
         .setFooter({ text: 'Clique no título para assistir à live' });
 
+      // Enviar a mensagem e armazenar no mapa de streams monitorados
       const liveMessage = await channel.send({ content: `🔴 @everyone ${twitchUser} está ao vivo!`, embeds: [updatedEmbed] });
       monitoredStreams.set(twitchUser, { liveMessage, game: stream.game_name });
 
       liveStreamers.push({ username: twitchUser, game: stream.game_name });
-    } else if (!streamData && monitoredStreams.has(twitchUser)) {
+      rotatePresence(); // Atualiza a presença ao detectar um streamer ao vivo
+    } 
+    // Se o streamer não estiver mais ao vivo e está sendo monitorado
+    else if (!streamData && monitoredStreams.has(twitchUser)) {
       const liveMessage = monitoredStreams.get(twitchUser).liveMessage;
-      await liveMessage.delete();
-      monitoredStreams.delete(twitchUser);
+      await liveMessage.delete(); // Exclui a mensagem assim que o streamer sair do ar
+      monitoredStreams.delete(twitchUser); // Remove o streamer da lista de monitoramento
       liveStreamers = liveStreamers.filter(s => s.username !== twitchUser);
     }
   }
 }
 
-// Rotação de presença
+// Função para atualizar a thumbnail, jogo e contagem de visualizações das streams ao vivo
+async function updateThumbnails() {
+  const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
+
+  for (const [twitchUser, streamInfo] of monitoredStreams.entries()) {
+    const streamData = await checkStream(twitchUser);
+
+    if (streamData) {
+      const { stream, profileImageUrl } = streamData;
+      const thumbnailUrl = stream.thumbnail_url.replace('{width}', '400').replace('{height}', '225'); // Atualizar a thumbnail
+
+      const updatedEmbed = new EmbedBuilder()
+        .setTitle(`${twitchUser} está ao vivo na Twitch!`)
+        .setURL(`https://twitch.tv/${twitchUser}`)
+        .setDescription(`**Título**: ${stream.title}\n**Jogo**: ${stream.game_name}\n**Visualizações**: ${stream.viewer_count}`)
+        .setThumbnail(profileImageUrl) // Manter a mesma imagem do perfil
+        .setImage(thumbnailUrl)
+        .setColor(Colors.Red)
+        .setFooter({ text: 'Clique no título para assistir à live' });
+
+      await streamInfo.liveMessage.edit({ embeds: [updatedEmbed] }); // Edita a mensagem para atualizar a thumbnail, jogo e visualizações
+    }
+  }
+}
+
+// Função para atualizar a presença do bot
 function rotatePresence() {
   console.log("Rotating presence...");
 
@@ -124,53 +169,23 @@ function rotatePresence() {
   }
 }
 
-// Configurar o bot para alternar o presence a cada 1 minuto
-setInterval(rotatePresence, 60 * 1000);
-
-// Adicionar um novo streamer ao .env e à lista
-function addTwitchUser(username) {
-  if (!TWITCH_USERS.includes(username)) {
-    TWITCH_USERS.push(username);
-    updateEnvConfig();
-    console.log(`Streamer ${username} adicionado!`);
-  }
-}
-
-// Remover um streamer da lista
-function removeTwitchUser(username) {
-  if (TWITCH_USERS.includes(username)) {
-    TWITCH_USERS = TWITCH_USERS.filter(user => user !== username);
-    updateEnvConfig();
-    console.log(`Streamer ${username} removido!`);
-  }
-}
-
-// Atualiza o arquivo .env
-function updateEnvConfig() {
-  const envConfig = fs.readFileSync('.env', 'utf8');
-  const updatedEnvConfig = envConfig.replace(
-    /^TWITCH_USERS=.*$/m,
-    `TWITCH_USERS=${TWITCH_USERS.join(',')}`
-  );
-  fs.writeFileSync('.env', updatedEnvConfig);
-}
-
-// Configurar os comandos
-client.on('interactionCreate', async interaction => {
+// Configurar o bot para escutar comandos
+client.on('interactionCreate', async (interaction) => {
   if (!interaction.isCommand()) return;
 
   const { commandName, options } = interaction;
 
-  if (commandName === 'twitch') {
+  if (commandName === 'add') {
     const username = options.getString('username');
 
     if (TWITCH_USERS.includes(username)) {
       await interaction.reply(`${username} já está na lista.`);
     } else {
-      addTwitchUser(username);
+      TWITCH_USERS.push(username);
+      fs.writeFileSync('.env', `TWITCH_USERS=${TWITCH_USERS.join(',')}\n`); // Atualiza o .env
       await interaction.reply(`Streamer ${username} adicionado à lista.`);
     }
-  } else if (commandName === 'remover') {
+  } else if (commandName === 'remove') {
     const username = options.getString('username');
 
     if (!TWITCH_USERS.includes(username)) {
@@ -182,35 +197,19 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// Configuração do bot
+// Inicialização do bot
 client.once('ready', async () => {
-  console.log(`Bot conectado como ${client.user.tag}`);
+  console.log('Bot está online!');
+  await getTwitchAccessToken(); // Obter o token de acesso ao iniciar
 
-  const data = new SlashCommandBuilder()
-    .setName('twitch')
-    .setDescription('Adiciona um streamer da Twitch para ser monitorado')
-    .addStringOption(option =>
-      option.setName('username')
-        .setDescription('Nome do usuário da Twitch')
-        .setRequired(true)
-    );
+  // Limpa o chat quando o bot é iniciado
+  const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
+  await clearChat(channel);
 
-  const removeCommand = new SlashCommandBuilder()
-    .setName('remover')
-    .setDescription('Remove um streamer da Twitch da lista de monitoramento')
-    .addStringOption(option =>
-      option.setName('username')
-        .setDescription('Nome do usuário da Twitch')
-        .setRequired(true)
-    );
-
-  await client.application.commands.create(data.toJSON(), GUILD_ID);
-  await client.application.commands.create(removeCommand.toJSON(), GUILD_ID);
-
-  // Iniciar verificação a cada 60 segundos
-  await getTwitchAccessToken();
-  setInterval(checkTwitchStreams, 60000);
+  checkTwitchStreams(); // Verifica as streams ativas na inicialização
+  setInterval(checkTwitchStreams, 10 * 60 * 1000); // Verifica as streams a cada 10 minutos
+  setInterval(updateThumbnails, 10 * 60 * 1000); // Atualiza a thumbnail, jogo e visualizações a cada 10 minutos
 });
 
-// Iniciar o bot
+// Login no Discord
 client.login(DISCORD_TOKEN);
