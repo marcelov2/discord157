@@ -1,9 +1,7 @@
-version: '3.9' # Atualize para a versão mais recente
+version: '3.8'
 
 services:
-  twitch-webhook:
+  discord-bot:
     build: .
-    ports:
-      - "3001:3000"
-    env_file:
-      - .env
+    env_file: .env
+    restart: unless-stopped
