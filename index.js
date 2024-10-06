@@ -1,79 +1,82 @@
 const express = require('express');
 const axios = require('axios');
-const bodyParser = require('body-parser');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
+const TWITCH_USER_IDS = process.env.TWITCH_USER_ID.split(','); // Converte a string em um array
+const monitoredStreams = new Map();
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 
-app.use(bodyParser.json());
+app.use(express.json());
 
-// URL do Discord onde a notificação será enviada
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
-
-// Inscrição em Webhook da Twitch
-const subscribeToTwitchWebhook = async (twitchUserId) => {
-  try {
-    const response = await axios.post('https://api.twitch.tv/helix/webhooks/hub', {
-      "hub.callback": `${process.env.SERVER_URL}/webhook/twitch`,
-      "hub.mode": "subscribe",
-      "hub.topic": `https://api.twitch.tv/helix/streams?user_id=${twitchUserId}`,
-      "hub.lease_seconds": 864000, // 10 dias
-      "hub.secret": process.env.WEBHOOK_SECRET
-    }, {
-      headers: {
-        'Client-ID': process.env.TWITCH_CLIENT_ID,
-        Authorization: `Bearer ${process.env.TWITCH_ACCESS_TOKEN}`
-      }
-    });
-
-    console.log('Inscrição em Webhook realizada com sucesso:', response.data);
-  } catch (error) {
-    console.error('Erro ao se inscrever no Webhook:', error.response.data);
-  }
-};
-
-// Endpoint que a Twitch chamará quando o streamer ficar ao vivo
-app.post('/webhook/twitch', (req, res) => {
-  const { data } = req.body;
-
-  if (data && data.length > 0) {
-    const stream = data[0]; // Primeiro stream da lista
-    const streamerName = stream.user_name;
-
-    const embed = {
-      title: `${streamerName} está ao vivo na Twitch!`,
-      url: `https://twitch.tv/${streamerName}`,
-      description: `**Título**: ${stream.title}\n**Jogo**: ${stream.game_name}\n**Visualizações**: ${stream.viewer_count}`,
-      color: 16711680, // Vermelho
-      footer: {
-        text: 'Clique no título para assistir à live'
-      },
-      thumbnail: {
-        url: stream.thumbnail_url.replace('{width}', '400').replace('{height}', '225')
-      }
-    };
-
-    // Envia mensagem para o Discord
-    axios.post(DISCORD_WEBHOOK_URL, {
-      content: `🔴 @everyone ${streamerName} está ao vivo!`,
-      embeds: [embed]
-    })
-    .then(() => {
-      console.log(`Notificação enviada para o Discord: ${streamerName} está ao vivo!`);
-    })
-    .catch(error => {
-      console.error('Erro ao enviar mensagem para o Discord:', error);
-    });
-  }
-
-  res.sendStatus(200); // Resposta para a Twitch
+client.once('ready', () => {
+    console.log(`Bot logged in as ${client.user.tag}`);
+    subscribeToTwitchWebhooks();
 });
 
-// Inicia o servidor
+app.post('/webhook/twitch', (req, res) => {
+    const { data } = req.body;
+
+    if (data && data[0]) {
+        const userId = data[0].user_id;
+        const streamTitle = data[0].title;
+        const profileImageUrl = data[0].profile_image_url; // URL da imagem do perfil
+        const thumbnailUrl = data[0].thumbnail_url.replace('{width}', '400').replace('{height}', '225'); // Miniatura da stream em 400x225
+
+        const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
+        
+        if (monitoredStreams.has(userId)) {
+            const liveMessage = monitoredStreams.get(userId);
+            liveMessage.edit({
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle(`${streamTitle} está ao vivo!`)
+                        .setURL(`https://twitch.tv/${userId}`)
+                        .setThumbnail(profileImageUrl)
+                        .setImage(thumbnailUrl)
+                        .setColor('#9146FF') // Cor roxa da Twitch
+                        .setFooter({ text: 'Clique no título para assistir à live' })
+                ]
+            });
+        } else {
+            const liveMessage = channel.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle(`${streamTitle} está ao vivo!`)
+                        .setURL(`https://twitch.tv/${userId}`)
+                        .setThumbnail(profileImageUrl)
+                        .setImage(thumbnailUrl)
+                        .setColor('#9146FF') // Cor roxa da Twitch
+                        .setFooter({ text: 'Clique no título para assistir à live' })
+                ]
+            });
+            monitoredStreams.set(userId, liveMessage);
+        }
+    }
+    res.status(200).send('OK');
+});
+
+async function subscribeToTwitchWebhooks() {
+    for (const twitchUserId of TWITCH_USER_IDS) {
+        await axios.post('https://api.twitch.tv/helix/webhooks/hub', {
+            "hub.callback": `${process.env.SERVER_URL}/webhook/twitch`,
+            "hub.mode": "subscribe",
+            "hub.topic": `https://api.twitch.tv/helix/streams?user_id=${twitchUserId}`,
+            "hub.lease_seconds": 864000, // A assinatura expira em 10 dias
+            "hub.secret": process.env.WEBHOOK_SECRET
+        }, {
+            headers: {
+                'Client-ID': process.env.TWITCH_CLIENT_ID,
+                'Authorization': `Bearer ${process.env.TWITCH_ACCESS_TOKEN}`,
+                'Content-Type': 'application/json'
+            }
+        }).catch(err => console.error(`Failed to subscribe to user ${twitchUserId}:`, err));
+    }
+}
+
+client.login(process.env.DISCORD_BOT_TOKEN);
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-  // Inscrever-se no Webhook da Twitch para cada streamer
-  const twitchUserId = process.env.TWITCH_USER_ID; // Adicione o ID do usuário que você deseja monitorar
-  subscribeToTwitchWebhook(twitchUserId);
+    console.log(`Server is running on http://localhost:${PORT}`);
 });
