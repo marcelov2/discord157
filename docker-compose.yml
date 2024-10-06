@@ -1,9 +1,9 @@
-version: '3.8'
+version: '3.9' # Atualize para a versão mais recente
 
 services:
   twitch-webhook:
     build: .
     ports:
-      - "3000:3000"
+      - "3001:3000"
     env_file:
       - .env
