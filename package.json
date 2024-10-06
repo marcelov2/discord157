@@ -1,4 +1,4 @@
-GNU nano 7.2                                          package.json                                                    {
+{
     "name": "twitchbot",
     "version": "1.0.0",
     "main": "index.js",
@@ -10,4 +10,3 @@ GNU nano 7.2                                          package.json              
       "node-fetch": "^3.0.0"
     }
   }
-  
