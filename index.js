@@ -98,7 +98,7 @@ async function checkTwitchStreams() {
     // Se o streamer estiver ao vivo e não está sendo monitorado
     if (streamData && !monitoredStreams.has(twitchUser)) {
       const { stream, profileImageUrl } = streamData;
-      const thumbnailUrl = stream.thumbnail_url.replace('{width}', '400').replace('{height}', '225'); // Miniatura da stream em 400x80
+      const thumbnailUrl = stream.thumbnail_url.replace('{width}', '400').replace('{height}', '225') + `?time=${Date.now()}`; // Miniatura da stream em 400x225 com timestamp para evitar cache
 
       const updatedEmbed = new EmbedBuilder()
         .setTitle(`${twitchUser} está ao vivo na Twitch!`)
@@ -135,7 +135,7 @@ async function updateThumbnails() {
 
     if (streamData) {
       const { stream, profileImageUrl } = streamData;
-      const thumbnailUrl = stream.thumbnail_url.replace('{width}', '400').replace('{height}', '225'); // Atualizar a thumbnail
+      const thumbnailUrl = stream.thumbnail_url.replace('{width}', '400').replace('{height}', '225') + `?time=${Date.now()}`; // Atualizar a thumbnail com timestamp
 
       const updatedEmbed = new EmbedBuilder()
         .setTitle(`${twitchUser} está ao vivo na Twitch!`)
