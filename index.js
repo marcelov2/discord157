@@ -197,7 +197,7 @@ client.once('ready', async () => {
   await clearChat(channel);
 
   checkTwitchStreams(); // Verifica as streams ativas na inicialização
-  setInterval(checkTwitchStreams, 10 * 60 * 1000); // Verifica as streams a cada 10 minutos
+  setInterval(checkTwitchStreams, 1 * 60 * 1000); // Verifica as streams a cada 1 minuto
   setInterval(updateThumbnails, 10 * 60 * 1000); // Atualiza as thumbnails a cada 10 minutos
 
   // Programar o reinício diário às 6h da manhã
