@@ -1,5 +1,12 @@
 import { config } from 'dotenv';
-import { Client, GatewayIntentBits, EmbedBuilder, Colors } from 'discord.js';
+import {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  EmbedBuilder,
+  Colors,
+} from 'discord.js';
 import axios from 'axios';
 import fs from 'fs';
 
@@ -7,7 +14,11 @@ import fs from 'fs';
 config(); // Carregar variáveis de ambiente
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -188,6 +199,46 @@ function resetBot() {
   process.exit(); // Sai do processo para que o gerenciador (PM2 ou Docker) reinicie
 }
 
+// Registro de comandos slash
+const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+
+const commands = [
+  {
+    name: 'add',
+    description: 'Adiciona um streamer para monitorar.',
+    options: [
+      {
+        type: 3, // Tipo "String"
+        name: 'username',
+        description: 'Nome do usuário da Twitch',
+        required: true,
+      },
+    ],
+  },
+  {
+    name: 'remove',
+    description: 'Remove um streamer do monitoramento.',
+    options: [
+      {
+        type: 3, // Tipo "String"
+        name: 'username',
+        description: 'Nome do usuário da Twitch',
+        required: true,
+      },
+    ],
+  },
+];
+
+(async () => {
+  try {
+    console.log('Começando o registro de comandos slash...');
+    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+    console.log('Comandos registrados com sucesso!');
+  } catch (error) {
+    console.error('Erro ao registrar comandos:', error);
+  }
+})();
+
 // Inicialização do bot
 client.once('ready', async () => {
   console.log('Bot está online!');
@@ -197,17 +248,45 @@ client.once('ready', async () => {
   await clearChat(channel);
 
   checkTwitchStreams(); // Verifica as streams ativas na inicialização
-  setInterval(checkTwitchStreams, 1 * 60 * 1000); // Verifica as streams a cada 1 minuto
-  setInterval(updateThumbnails, 10 * 60 * 1000); // Atualiza as thumbnails a cada 10 minutos
+  setInterval(checkTwitchStreams, 1 * 60 * 1000); // Verifica a cada 1 minuto
+  setInterval(updateThumbnails, 10 * 60 * 1000); // Atualiza a cada 10 minutos
 
-  // Programar o reinício diário às 6h da manhã
-  const timeUntilNextReset = calculateTimeUntilNextReset();
-  console.log(`Próximo reinício em: ${timeUntilNextReset / 1000 / 60} minutos`);
-  setTimeout(() => {
-    resetBot();
-    setInterval(resetBot, 24 * 60 * 60 * 1000); // Reiniciar todo dia às 6h
-  }, timeUntilNextReset);
+  // Reinicia o bot às 6h da manhã
+  setInterval(() => {
+    const timeUntilReset = calculateTimeUntilNextReset();
+    if (timeUntilReset <= 0) {
+      resetBot();
+    }
+  }, 60 * 1000); // Checa a cada 1 minuto
 });
 
-// Login no Discord
+// Comando para adicionar um streamer
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isCommand()) return;
+
+  const { commandName, options } = interaction;
+
+  if (commandName === 'add') {
+    const username = options.getString('username');
+    if (!TWITCH_USERS.includes(username)) {
+      TWITCH_USERS.push(username);
+      fs.writeFileSync('.env', `TWITCH_USERS=${TWITCH_USERS.join(',')}`); // Atualiza o .env
+      await interaction.reply(`Streamer ${username} adicionado com sucesso!`);
+    } else {
+      await interaction.reply(`O streamer ${username} já está sendo monitorado.`);
+    }
+  } else if (commandName === 'remove') {
+    const username = options.getString('username');
+    const index = TWITCH_USERS.indexOf(username);
+    if (index > -1) {
+      TWITCH_USERS.splice(index, 1);
+      fs.writeFileSync('.env', `TWITCH_USERS=${TWITCH_USERS.join(',')}`); // Atualiza o .env
+      await interaction.reply(`Streamer ${username} removido com sucesso!`);
+    } else {
+      await interaction.reply(`O streamer ${username} não está sendo monitorado.`);
+    }
+  }
+});
+
+// Login do bot
 client.login(DISCORD_TOKEN);
