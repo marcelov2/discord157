@@ -8,6 +8,8 @@ import {
   Colors,
 } from 'discord.js';
 import axios from 'axios';
+import { formatInTimeZone } from 'date-fns-tz';
+import { addDays } from 'date-fns';
 import fs from 'fs';
 
 // Configuração do Discord
@@ -102,7 +104,7 @@ async function checkTwitchStreams() {
   const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
   liveStreamers = [];
 
-  for (const twitchUser of TWITCH_USERS) {
+  const promises = TWITCH_USERS.map(async (twitchUser) => {
     const streamData = await checkStream(twitchUser);
 
     // Se o streamer estiver ao vivo e não está sendo monitorado
@@ -133,7 +135,9 @@ async function checkTwitchStreams() {
       monitoredStreams.delete(twitchUser); // Remove o streamer da lista de monitoramento
       liveStreamers = liveStreamers.filter(s => s.username !== twitchUser);
     }
-  }
+  });
+
+  await Promise.all(promises); // Aguarda a conclusão de todas as promessas
 }
 
 // Função para atualizar a thumbnail, jogo e contagem de visualizações das streams ao vivo
@@ -179,18 +183,31 @@ function rotatePresence() {
   }
 }
 
-// Função para calcular o tempo restante até as 6 da manhã do próximo dia
 function calculateTimeUntilNextReset() {
-  const now = new Date();
-  const nextReset = new Date();
+  const timeZone = 'America/Sao_Paulo'; // Fuso horário de Brasília
+  const now = new Date(); // Hora atual em UTC
 
-  nextReset.setHours(6, 0, 0, 0);
+  // Converte a hora atual para o fuso horário de Brasília
+  const nowInBrasilia = new Date(now.toLocaleString("en-US", { timeZone }));
 
-  if (now > nextReset) {
-    nextReset.setDate(nextReset.getDate() + 1);
+  // Define o próximo reset para as 6 da manhã do dia atual
+  const nextReset = new Date(nowInBrasilia);
+  nextReset.setHours(6, 0, 0, 0); // 6:00 AM
+
+  // Verifica se já passou das 6:00 AM em Brasília
+  if (nowInBrasilia >= nextReset) {
+      nextReset.setDate(nextReset.getDate() + 1); // Ajusta para o dia seguinte
   }
 
-  return nextReset - now;
+  // Calcula o tempo restante em milissegundos
+  const timeUntilNextReset = nextReset - nowInBrasilia;
+
+  // Exibe a data e hora atuais em Brasília
+  console.log(`Hora atual em Brasília: ${nowInBrasilia.toLocaleString("pt-BR", { timeZone })}`);
+  console.log(`Próximo reset em: ${nextReset.toLocaleString("pt-BR", { timeZone })}`); 
+  console.log(`Tempo até o próximo reset: ${Math.floor(timeUntilNextReset / 1000 / 60)} minutos e ${Math.floor((timeUntilNextReset / 1000) % 60)} segundos`);
+
+  return timeUntilNextReset;
 }
 
 // Função para reiniciar o bot
@@ -199,45 +216,13 @@ function resetBot() {
   process.exit(); // Sai do processo para que o gerenciador (PM2 ou Docker) reinicie
 }
 
-// Registro de comandos slash
-const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-
-const commands = [
-  {
-    name: 'add',
-    description: 'Adiciona um streamer para monitorar.',
-    options: [
-      {
-        type: 3, // Tipo "String"
-        name: 'username',
-        description: 'Nome do usuário da Twitch',
-        required: true,
-      },
-    ],
-  },
-  {
-    name: 'remove',
-    description: 'Remove um streamer do monitoramento.',
-    options: [
-      {
-        type: 3, // Tipo "String"
-        name: 'username',
-        description: 'Nome do usuário da Twitch',
-        required: true,
-      },
-    ],
-  },
-];
-
-(async () => {
-  try {
-    console.log('Começando o registro de comandos slash...');
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('Comandos registrados com sucesso!');
-  } catch (error) {
-    console.error('Erro ao registrar comandos:', error);
+// Para reiniciar o bot a cada 24 horas
+setInterval(() => {
+  const timeUntilNextReset = calculateTimeUntilNextReset();
+  if (timeUntilNextReset <= 0) {
+      resetBot(); // Reinicia o bot quando o tempo até o próximo reset for zero ou negativo
   }
-})();
+}, 60000); // Verifica a cada minuto
 
 // Inicialização do bot
 client.once('ready', async () => {
@@ -248,45 +233,56 @@ client.once('ready', async () => {
   await clearChat(channel);
 
   checkTwitchStreams(); // Verifica as streams ativas na inicialização
-  setInterval(checkTwitchStreams, 1 * 60 * 1000); // Verifica a cada 1 minuto
-  setInterval(updateThumbnails, 10 * 60 * 1000); // Atualiza a cada 10 minutos
+  setInterval(checkTwitchStreams, 1 * 60 * 1000); // Verifica as streams a cada 1 minuto
+  setInterval(updateThumbnails, 10 * 60 * 1000); // Atualiza as thumbnails a cada 1 minuto
 
-  // Reinicia o bot às 6h da manhã
-  setInterval(() => {
-    const timeUntilReset = calculateTimeUntilNextReset();
-    if (timeUntilReset <= 0) {
-      resetBot();
+  const resetTime = calculateTimeUntilNextReset();
+  setTimeout(resetBot, resetTime); // Reinicia o bot ao atingir a hora definida
+
+  // Registro de comandos slash
+  if (client.user) { // Verifica se client.user não é null
+    const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+
+    const commands = [
+      {
+        name: 'add',
+        description: 'Adiciona um novo streamer para monitoramento.',
+        options: [
+          {
+            name: 'streamer',
+            type: 3, // STRING
+            description: 'Nome do streamer a ser adicionado.',
+            required: true,
+          },
+        ],
+      },
+      {
+        name: 'remove',
+        description: 'Remove um streamer do monitoramento.',
+        options: [
+          {
+            name: 'streamer',
+            type: 3, // STRING
+            description: 'Nome do streamer a ser removido.',
+            required: true,
+          },
+        ],
+      },
+      {
+        name: 'list',
+        description: 'Lista os streamers atualmente monitorados.',
+      },
+    ];
+
+    try {
+      await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+      console.log('Comandos registrados com sucesso!');
+    } catch (error) {
+      console.error('Erro ao registrar comandos:', error);
     }
-  }, 60 * 1000); // Checa a cada 1 minuto
-});
-
-// Comando para adicionar um streamer
-client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isCommand()) return;
-
-  const { commandName, options } = interaction;
-
-  if (commandName === 'add') {
-    const username = options.getString('username');
-    if (!TWITCH_USERS.includes(username)) {
-      TWITCH_USERS.push(username);
-      fs.writeFileSync('.env', `TWITCH_USERS=${TWITCH_USERS.join(',')}`); // Atualiza o .env
-      await interaction.reply(`Streamer ${username} adicionado com sucesso!`);
-    } else {
-      await interaction.reply(`O streamer ${username} já está sendo monitorado.`);
-    }
-  } else if (commandName === 'remove') {
-    const username = options.getString('username');
-    const index = TWITCH_USERS.indexOf(username);
-    if (index > -1) {
-      TWITCH_USERS.splice(index, 1);
-      fs.writeFileSync('.env', `TWITCH_USERS=${TWITCH_USERS.join(',')}`); // Atualiza o .env
-      await interaction.reply(`Streamer ${username} removido com sucesso!`);
-    } else {
-      await interaction.reply(`O streamer ${username} não está sendo monitorado.`);
-    }
+  } else {
+    console.error('client.user não está disponível.');
   }
 });
 
-// Login do bot
 client.login(DISCORD_TOKEN);
