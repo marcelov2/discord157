@@ -1,10 +1,5 @@
 import { config } from 'dotenv';
-import {
-  Client,
-  GatewayIntentBits,
-  EmbedBuilder,
-  Colors,
-} from 'discord.js';
+import { Client, GatewayIntentBits, EmbedBuilder, Colors } from 'discord.js';
 import axios from 'axios';
 
 // Configuração do Discord e variáveis de ambiente
@@ -175,10 +170,15 @@ function restartBotIn12Hours() {
 client.once('ready', async () => {
   console.log('Bot está online!');
   await getTwitchAccessToken();
+
+  // Limpa o chat antes de iniciar a verificação das lives
+  const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
+  await clearChat(channel);
+
+  // Começa a monitorar os streamers e suas lives
   setInterval(checkTwitchStreams, 60 * 1000);  // Verifica as lives a cada 1 minuto
   setInterval(updateThumbnails, 15 * 60 * 1000);  // Atualiza as thumbnails a cada 15 minutos
   restartBotIn12Hours();  // Reinicia o bot a cada 12 horas
 });
 
-// Login do bot
 client.login(DISCORD_TOKEN);
